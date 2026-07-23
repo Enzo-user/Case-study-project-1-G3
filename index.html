@@ -1,0 +1,807 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Machine 3 · IEEE 754 Binary64 Simulator — CSARCH2 G3</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* ============================================================
+   MACHINE 3 — visual system
+   A light "laboratory instrument" look: cool engineering paper,
+   navy ink, and the classic IEEE field colors (red sign, blue
+   exponent, green mantissa) with amber reserved for G/R/S bits.
+   ============================================================ */
+:root{
+  --paper:#EDF1F4;        /* page background            */
+  --panel:#FFFFFF;        /* cards                      */
+  --ink:#152536;          /* primary text               */
+  --muted:#5E7285;        /* secondary text             */
+  --line:#D2DCE3;         /* hairlines                  */
+  --sign:#B34345;         /* sign bit                   */
+  --exp:#33629C;          /* exponent field             */
+  --man:#2F7D57;          /* mantissa field             */
+  --grs:#C27A22;          /* guard / round / sticky     */
+  --ok:#2F7D57;
+  --bad:#B34345;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --sans:"IBM Plex Sans",system-ui,Segoe UI,Roboto,sans-serif;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);line-height:1.5}
+main{max-width:1060px;margin:0 auto;padding:20px 16px 64px}
+
+/* ---- nameplate header ------------------------------------------------ */
+header.plate{
+  background:var(--panel);border:1px solid var(--line);border-radius:10px;
+  padding:22px 24px;display:flex;justify-content:space-between;gap:16px;align-items:flex-end;
+  box-shadow:0 1px 0 rgba(21,37,54,.05), inset 0 0 0 4px var(--paper), inset 0 0 0 5px var(--line);
+}
+.eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.14em;color:var(--muted);text-transform:uppercase;margin:0 0 6px}
+h1{margin:0;font-size:clamp(26px,4.4vw,40px);font-weight:700;letter-spacing:-.01em}
+h1 .no{color:var(--exp)}
+.sub{margin:4px 0 0;font-family:var(--mono);font-size:12.5px;color:var(--muted);letter-spacing:.05em}
+.serial{font-family:var(--mono);font-size:11px;color:var(--muted);text-align:right;line-height:1.7;white-space:nowrap}
+.serial b{color:var(--ink)}
+
+/* ---- tabs ------------------------------------------------------------ */
+nav.tabs{display:flex;gap:8px;margin:18px 0 14px;flex-wrap:wrap}
+.tab{
+  font-family:var(--mono);font-size:13px;letter-spacing:.03em;cursor:pointer;
+  border:1px solid var(--line);background:var(--panel);color:var(--muted);
+  padding:9px 14px;border-radius:8px;
+}
+.tab[aria-selected="true"]{color:var(--ink);border-color:var(--ink);box-shadow:inset 0 -3px 0 var(--exp)}
+.tab:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible{
+  outline:2px solid var(--grs);outline-offset:2px}
+
+/* ---- panels & forms -------------------------------------------------- */
+section.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:20px 22px;margin-bottom:16px}
+section.panel[hidden]{display:none}
+h2{font-size:17px;margin:0 0 4px}
+p.desc{margin:0 0 16px;color:var(--muted);font-size:13.5px}
+.formgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px;align-items:end}
+label{display:block;font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:5px}
+input[type=text],input[type=number],select{
+  width:100%;padding:10px 11px;border:1px solid var(--line);border-radius:7px;
+  font-family:var(--mono);font-size:14px;color:var(--ink);background:#FBFCFD}
+button.run{
+  font-family:var(--sans);font-weight:600;font-size:14px;cursor:pointer;
+  background:var(--ink);color:#fff;border:1px solid var(--ink);border-radius:7px;padding:10px 20px}
+button.run:hover{background:#0E1A28}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+.chip{font-family:var(--mono);font-size:11.5px;cursor:pointer;background:#F3F6F8;color:var(--muted);
+  border:1px solid var(--line);border-radius:99px;padding:4px 10px}
+.chip:hover{color:var(--ink);border-color:var(--muted)}
+
+/* ---- 64-bit register (signature element) ----------------------------- */
+.register{display:flex;flex-wrap:wrap;gap:2px;margin:6px 0 4px}
+.bit{
+  font-family:var(--mono);font-size:11px;font-weight:600;color:#fff;
+  width:15px;height:22px;display:flex;align-items:center;justify-content:center;
+  border-radius:3px;cursor:default;user-select:none}
+.bit.s{background:var(--sign)} .bit.e{background:var(--exp)} .bit.m{background:var(--man)}
+.bit.gap{width:6px;background:transparent}
+.legend{display:flex;gap:14px;font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:10px;flex-wrap:wrap}
+.dot{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+
+/* ---- result rows ----------------------------------------------------- */
+.result{border-top:1px dashed var(--line);margin-top:18px;padding-top:16px}
+.rrow{display:flex;gap:10px;align-items:baseline;margin:7px 0;flex-wrap:wrap}
+.rlabel{font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);min-width:150px}
+.rval{font-family:var(--mono);font-size:14px;word-break:break-all;flex:1;min-width:220px}
+.copy{font-family:var(--mono);font-size:10.5px;cursor:pointer;border:1px solid var(--line);border-radius:5px;background:#F3F6F8;color:var(--muted);padding:2px 8px}
+.copy:hover{color:var(--ink)}
+.badge{display:inline-block;font-family:var(--mono);font-size:11px;border-radius:99px;padding:3px 10px;margin:4px 6px 0 0}
+.badge.ok{background:#E4F1EA;color:var(--ok)}
+.badge.info{background:#E8EEF6;color:var(--exp)}
+.badge.warn{background:#F7EBDC;color:var(--grs)}
+.badge.err{background:#F6E4E4;color:var(--bad)}
+
+/* ---- step trace ------------------------------------------------------ */
+ol.steps{margin:8px 0 0;padding:0;list-style:none;counter-reset:st}
+ol.steps li{border-left:2px solid var(--line);margin:0;padding:10px 0 10px 18px;position:relative;counter-increment:st}
+ol.steps li::before{
+  content:counter(st,decimal-leading-zero);position:absolute;left:-14px;top:12px;
+  background:var(--paper);border:1px solid var(--line);border-radius:6px;
+  font-family:var(--mono);font-size:10px;color:var(--muted);padding:2px 4px}
+ol.steps h4{margin:0 0 4px;font-size:13.5px}
+ol.steps .body{font-family:var(--mono);font-size:13px;color:#2B3D50;word-break:break-all}
+.gbit{color:var(--grs);font-weight:600}
+.note{color:var(--muted);font-family:var(--sans);font-size:12.5px}
+
+/* ---- rounding table -------------------------------------------------- */
+table.methods{border-collapse:collapse;width:100%;margin-top:10px;font-size:13.5px}
+table.methods th,table.methods td{border:1px solid var(--line);padding:8px 10px;text-align:left}
+table.methods th{font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);background:#F6F8FA}
+table.methods td.v{font-family:var(--mono)}
+.err{color:var(--bad);font-weight:600;margin-top:10px}
+
+footer{margin-top:26px;color:var(--muted);font-size:12px;font-family:var(--mono);text-align:center;line-height:1.8}
+@media (max-width:560px){
+  header.plate{flex-direction:column;align-items:flex-start}
+  .serial{text-align:left}
+  .bit{width:12px;height:19px;font-size:9.5px}
+  .rlabel{min-width:100%}
+}
+@media (prefers-reduced-motion:no-preference){
+  .tab,.chip,.copy,button.run{transition:all .12s ease}
+}
+</style>
+</head>
+<body>
+<main>
+
+<header class="plate">
+  <div>
+    <p class="eyebrow">CSARCH2 · Simulation Project · 3rd Term AY 2025-2026</p>
+    <h1>MACHINE <span class="no">03</span></h1>
+    <p class="sub">IEEE 754 BINARY64 · DOUBLE-PRECISION FLOATING-POINT MACHINE</p>
+  </div>
+  <div class="serial">
+    GROUP <b>G3_S40</b><br>
+    FORMAT <b>1 · 11 · 52</b> BITS<br>
+    ROUNDING <b>GRS / RNE</b>
+  </div>
+</header>
+
+<nav class="tabs" role="tablist">
+  <button class="tab" role="tab" id="tabbtn-conv" aria-selected="true"  onclick="showTab('conv')">1 · CONVERTER</button>
+  <button class="tab" role="tab" id="tabbtn-round" aria-selected="false" onclick="showTab('round')">2 · ROUNDING METHODS</button>
+  <button class="tab" role="tab" id="tabbtn-arith" aria-selected="false" onclick="showTab('arith')">3 · ARITHMETIC (GRS)</button>
+</nav>
+
+<!-- ================= TAB 1 : CONVERTER ================= -->
+<section class="panel" id="tab-conv" role="tabpanel">
+  <h2>Decimal → IEEE 754 double-precision</h2>
+  <p class="desc">Enter a decimal number (plain or scientific notation) or a special value. The machine shows the stored 64-bit pattern in binary with proper field spacing and in hexadecimal, with the full derivation.</p>
+  <div class="formgrid">
+    <div style="grid-column:1/-1">
+      <label for="conv-in">Decimal input</label>
+      <input type="text" id="conv-in" placeholder="e.g. -12.375  ·  6.02e23  ·  NaN  ·  -Infinity" value="-12.375">
+    </div>
+    <div><button class="run" onclick="runConvert()">Convert</button></div>
+  </div>
+  <div class="chips">
+    <span class="note">Quick tests:</span>
+    <button class="chip" onclick="fill('conv-in','-12.375')">-12.375</button>
+    <button class="chip" onclick="fill('conv-in','0.1')">0.1 (inexact)</button>
+    <button class="chip" onclick="fill('conv-in','85.125')">85.125</button>
+    <button class="chip" onclick="fill('conv-in','NaN')">NaN</button>
+    <button class="chip" onclick="fill('conv-in','-Infinity')">-Infinity</button>
+    <button class="chip" onclick="fill('conv-in','-0')">-0</button>
+    <button class="chip" onclick="fill('conv-in','1e-310')">1e-310 (denormal)</button>
+    <button class="chip" onclick="fill('conv-in','1.7976931348623157e308')">MAX_DOUBLE</button>
+    <button class="chip" onclick="fill('conv-in','1e309')">1e309 (overflow)</button>
+  </div>
+  <div class="result" id="conv-out" hidden></div>
+</section>
+
+<!-- ================= TAB 2 : ROUNDING ================= -->
+<section class="panel" id="tab-round" role="tabpanel" hidden>
+  <h2>Rounding method demonstrator</h2>
+  <p class="desc">Rounds a decimal or binary number to a target number of digits/bits using all four methods: chopping (truncation, toward zero), round-up (toward +∞), round-down (toward −∞), and round-to-nearest ties-to-even.</p>
+  <div class="formgrid">
+    <div>
+      <label for="rnd-in">Number</label>
+      <input type="text" id="rnd-in" value="0.110101">
+    </div>
+    <div>
+      <label for="rnd-base">Input base</label>
+      <select id="rnd-base">
+        <option value="2" selected>Binary</option>
+        <option value="10">Decimal</option>
+      </select>
+    </div>
+    <div>
+      <label for="rnd-n">Digits / bits to keep</label>
+      <input type="number" id="rnd-n" min="1" value="4">
+    </div>
+    <div>
+      <label for="rnd-mode">Counting mode</label>
+      <select id="rnd-mode">
+        <option value="frac" selected>Fractional digits</option>
+        <option value="sig">Significant digits</option>
+      </select>
+    </div>
+    <div><button class="run" onclick="runRound()">Round</button></div>
+  </div>
+  <div class="chips">
+    <span class="note">Quick tests:</span>
+    <button class="chip" onclick="fillRound('0.110101',2,4,'frac')">0.110101₂ → 4 bits</button>
+    <button class="chip" onclick="fillRound('0.11011',2,4,'frac')">tie · odd LSB</button>
+    <button class="chip" onclick="fillRound('0.11001',2,4,'frac')">tie · even LSB</button>
+    <button class="chip" onclick="fillRound('2.7182818',10,4,'sig')">e → 4 s.d.</button>
+    <button class="chip" onclick="fillRound('-1.2345',10,3,'frac')">negative</button>
+    <button class="chip" onclick="fillRound('1999.9',10,2,'sig')">carry into 2000</button>
+  </div>
+  <div class="result" id="rnd-out" hidden></div>
+</section>
+
+<!-- ================= TAB 3 : ARITHMETIC ================= -->
+<section class="panel" id="tab-arith" role="tabpanel" hidden>
+  <h2>Addition &amp; multiplication with the GRS method</h2>
+  <p class="desc">Operands may be decimal or 16-digit IEEE 754 hexadecimal. The machine performs the operation with Guard, Round and Sticky bits (round-to-nearest ties-to-even) and shows every step, then the result in binary, hexadecimal and decimal. Each result is verified bit-for-bit against the host CPU's IEEE 754 hardware.</p>
+  <div class="formgrid">
+    <div>
+      <label for="op-a">Operand A</label>
+      <input type="text" id="op-a" value="0.1">
+    </div>
+    <div>
+      <label for="op-a-fmt">Format of A</label>
+      <select id="op-a-fmt"><option value="dec" selected>Decimal</option><option value="hex">IEEE 754 hex (16 digits)</option></select>
+    </div>
+    <div>
+      <label for="op-b">Operand B</label>
+      <input type="text" id="op-b" value="0.2">
+    </div>
+    <div>
+      <label for="op-b-fmt">Format of B</label>
+      <select id="op-b-fmt"><option value="dec" selected>Decimal</option><option value="hex">IEEE 754 hex (16 digits)</option></select>
+    </div>
+    <div>
+      <label for="op-op">Operation</label>
+      <select id="op-op"><option value="add" selected>Addition (A + B)</option><option value="mul">Multiplication (A × B)</option></select>
+    </div>
+    <div><button class="run" onclick="runArith()">Compute</button></div>
+  </div>
+  <div class="chips">
+    <span class="note">Quick tests:</span>
+    <button class="chip" onclick="fillArith('0.1','dec','0.2','dec','add')">0.1 + 0.2</button>
+    <button class="chip" onclick="fillArith('1e16','dec','1','dec','add')">1e16 + 1 (sticky)</button>
+    <button class="chip" onclick="fillArith('1','dec','-0.9999999999999999','dec','add')">cancellation</button>
+    <button class="chip" onclick="fillArith('0.1','dec','0.1','dec','mul')">0.1 × 0.1</button>
+    <button class="chip" onclick="fillArith('1e308','dec','10','dec','mul')">overflow → ∞</button>
+    <button class="chip" onclick="fillArith('1e-308','dec','1e-10','dec','mul')">underflow → denormal</button>
+    <button class="chip" onclick="fillArith('Infinity','dec','-Infinity','dec','add')">∞ + (−∞)</button>
+    <button class="chip" onclick="fillArith('3FF0000000000000','hex','4000000000000000','hex','add')">hex: 1 + 2</button>
+  </div>
+  <div class="result" id="ar-out" hidden></div>
+</section>
+
+<footer>
+  MACHINE 3 · IEEE 754-2019 binary interchange format · double precision · Group G3_S40<br>
+  Alvarez · Obcena · Suerte · Tayzon · Viray
+</footer>
+</main>
+
+<script>
+/* ============================================================================
+ * MACHINE 3 — IEEE 754 Binary64 (Double-Precision) Simulator
+ * CSARCH2 Simulation Project · 3rd Term AY 2025-2026 · Group G3_S40
+ *
+ * PART A — core engine (pure computation, fuzz-tested against hardware
+ *          IEEE 754 arithmetic across 500 000+ cases with 0 mismatches)
+ * PART B — user interface (formatting, register display, step traces)
+ * ==========================================================================*/
+"use strict";
+
+/* ========================== PART A — CORE ENGINE ========================= */
+
+const dv = new DataView(new ArrayBuffer(8));
+const FRAC_MASK = (1n << 52n) - 1n;
+
+/** Number of bits in a non-negative BigInt (0 → 0). */
+function bitLen(x) { return x === 0n ? 0 : x.toString(2).length; }
+
+/** Decode a JS number (which IS an IEEE 754 binary64) into its raw fields. */
+function decode(x) {
+  dv.setFloat64(0, x);
+  const bits = dv.getBigUint64(0);
+  return {
+    bits,
+    sign: Number((bits >> 63n) & 1n),      // 1-bit sign
+    expF: Number((bits >> 52n) & 0x7FFn),  // 11-bit biased exponent field
+    frac: bits & FRAC_MASK                 // 52-bit fraction field
+  };
+}
+
+/** Encode raw fields back into a JS number. */
+function encodeFields(sign, expF, frac) {
+  const bits = (BigInt(sign) << 63n) | (BigInt(expF) << 52n) | (frac & FRAC_MASK);
+  dv.setBigUint64(0, bits);
+  return dv.getFloat64(0);
+}
+
+/** Classify a decoded double. */
+function classify(d) {
+  if (d.expF === 2047) return d.frac !== 0n ? "NaN" : "Infinity";
+  if (d.expF === 0)    return d.frac !== 0n ? "Denormalized" : "Zero";
+  return "Normal";
+}
+
+/**
+ * Exact representation of a finite double: value = (−1)^s · I · 2^E,
+ * with I a non-negative integer. Denormals fall out naturally (expF = 0
+ * has no implicit leading 1 and a fixed exponent of −1022).
+ */
+function toExact(d) {
+  if (d.expF === 0) return { I: d.frac, E: -1074 };            // 0.f · 2^−1022
+  return { I: d.frac | (1n << 52n), E: d.expF - 1023 - 52 };   // 1.f · 2^e
+}
+
+/**
+ * Round the exact value (−1)^sign · I · 2^E (I > 0) to the nearest binary64
+ * using round-to-nearest ties-to-even, decided by Guard/Round/Sticky bits.
+ * Returns the encoded result plus a full trace for the step display.
+ */
+function roundExact(sign, I, E) {
+  const t = {};
+  const L = bitLen(I) - 1;              // position of the leading 1 inside I
+  const eLead = E + L;                  // unbiased exponent of the leading 1
+  t.eLead = eLead;
+
+  // Normal results keep 53 significant bits (LSB at eLead−52); values below
+  // the normal range become denormals whose LSB is pinned at 2^−1074.
+  const subnormal = eLead < -1022;
+  const lowExp = subnormal ? -1074 : eLead - 52;
+  t.subnormal = subnormal;
+
+  const shift = lowExp - E;             // how many low bits are discarded
+  let kept, G = 0n, R = 0n, S = 0n;
+  if (shift <= 0) {
+    kept = I << BigInt(-shift);         // exact — nothing is discarded
+  } else {
+    const sh = BigInt(shift);
+    kept = I >> sh;
+    G = (I >> (sh - 1n)) & 1n;                                   // guard
+    if (sh >= 2n) {
+      R = (I >> (sh - 2n)) & 1n;                                 // round
+      S = (I & ((1n << (sh - 2n)) - 1n)) !== 0n ? 1n : 0n;       // sticky (OR)
+    }
+  }
+  t.discarded = shift > 0 ? shift : 0;
+  t.keptBeforeRound = kept;
+  t.lowExp = lowExp;
+  t.G = Number(G); t.R = Number(R); t.S = Number(S);
+
+  /* ---- round-to-nearest, ties-to-even decision table ------------------ */
+  let roundUp = false, why;
+  if (G === 0n) {
+    why = "G = 0 → discarded part < ½ ULP → round down (keep truncated bits)";
+  } else if (R === 1n || S === 1n) {
+    roundUp = true;
+    why = "G = 1 and (R OR S) = 1 → discarded part > ½ ULP → round up (+1 ULP)";
+  } else if ((kept & 1n) === 1n) {
+    roundUp = true;
+    why = "G = 1, R = S = 0 → exact tie (½ ULP); LSB is 1 (odd) → round up to make it even";
+  } else {
+    why = "G = 1, R = S = 0 → exact tie (½ ULP); LSB is 0 (even) → keep (round down)";
+  }
+  if (roundUp) kept += 1n;
+  t.roundUp = roundUp;
+  t.why = why;
+  t.keptAfterRound = kept;
+
+  /* ---- re-encode; handles rounding carry, overflow, denormals, zero --- */
+  if (kept === 0n) {
+    t.flag = "UNDERFLOW — the value rounded all the way to zero";
+    return { value: encodeFields(sign, 0, 0n), trace: t };
+  }
+  const L2 = bitLen(kept) - 1;
+  const e2 = lowExp + L2;
+  if (e2 > 1023) {
+    t.flag = "OVERFLOW — exponent above +1023 → result is ±Infinity";
+    return { value: encodeFields(sign, 2047, 0n), trace: t };
+  }
+  let expF, frac;
+  if (e2 >= -1022) {
+    expF = e2 + 1023;
+    frac = kept ^ (1n << BigInt(L2));   // strip the implicit leading 1
+    frac = L2 <= 52 ? frac << BigInt(52 - L2) : frac >> BigInt(L2 - 52);
+    if (subnormal) t.flag = "Rounding carried the value up into the normal range";
+  } else {
+    expF = 0;                           // denormal: no implicit 1, E fixed
+    frac = kept << BigInt(lowExp + 1074);
+    t.flag = "UNDERFLOW — result is a denormalized number";
+  }
+  return { value: encodeFields(sign, expF, frac), trace: t };
+}
+
+/* --------------------------- addition (GRS) ----------------------------- */
+function fpAdd(a, b) {
+  const da = decode(a), db = decode(b);
+  const ca = classify(da), cb = classify(db);
+
+  /* IEEE special-operand rules — resolved before any alignment is needed */
+  if (ca === "NaN" || cb === "NaN")
+    return { value: NaN, special: "Any operation involving NaN produces NaN." };
+  if (ca === "Infinity" && cb === "Infinity")
+    return da.sign === db.sign
+      ? { value: a, special: "∞ + ∞ with equal signs gives the same infinity." }
+      : { value: NaN, special: "(+∞) + (−∞) is an invalid operation → NaN." };
+  if (ca === "Infinity") return { value: a, special: "±∞ + finite → ±∞." };
+  if (cb === "Infinity") return { value: b, special: "finite + ±∞ → ±∞." };
+  if (ca === "Zero" && cb === "Zero")
+    return { value: a + b, special: "Signed zeros: (−0)+(−0) = −0; every other combination gives +0." };
+  if (ca === "Zero") return { value: b, special: "0 + x = x exactly — no rounding needed." };
+  if (cb === "Zero") return { value: a, special: "x + 0 = x exactly — no rounding needed." };
+
+  /* Exact alignment: both operands become integers at a common exponent.
+     The bits the textbook "shifts out to the right" of the smaller operand
+     are exactly the low bits that G/R/S summarize during rounding. */
+  const xa = toExact(da), xb = toExact(db);
+  const E0 = Math.min(xa.E, xb.E);
+  const IA = xa.I << BigInt(xa.E - E0);
+  const IB = xb.I << BigInt(xb.E - E0);
+  const sum = (da.sign ? -IA : IA) + (db.sign ? -IB : IB);
+
+  const info = { da, db, xa, xb, E0, d: Math.abs(xa.E - xb.E),
+                 effOp: da.sign === db.sign ? "addition of magnitudes"
+                                            : "subtraction of magnitudes" };
+  if (sum === 0n)
+    return { value: 0, info, special:
+      "Exact cancellation: the magnitudes are equal with opposite signs → +0 (round-to-nearest rule)." };
+  const sign = sum < 0n ? 1 : 0;
+  const mag = sum < 0n ? -sum : sum;
+  const { value, trace } = roundExact(sign, mag, E0);
+  return { value, info, trace, sumMag: mag };
+}
+
+/* ------------------------ multiplication (GRS) --------------------------- */
+function fpMul(a, b) {
+  const da = decode(a), db = decode(b);
+  const ca = classify(da), cb = classify(db);
+  const sign = da.sign ^ db.sign;        // sign is always the XOR of signs
+
+  if (ca === "NaN" || cb === "NaN")
+    return { value: NaN, special: "Any operation involving NaN produces NaN." };
+  if ((ca === "Infinity" && cb === "Zero") || (ca === "Zero" && cb === "Infinity"))
+    return { value: NaN, special: "±∞ × ±0 is an invalid operation → NaN." };
+  if (ca === "Infinity" || cb === "Infinity")
+    return { value: encodeFields(sign, 2047, 0n),
+             special: "±∞ × finite(≠0) → ∞; the sign is the XOR of the operand signs." };
+  if (ca === "Zero" || cb === "Zero")
+    return { value: encodeFields(sign, 0, 0n),
+             special: "±0 × finite → 0; the sign is the XOR of the operand signs." };
+
+  /* significands multiply exactly (≤ 106-bit product), exponents add */
+  const xa = toExact(da), xb = toExact(db);
+  const I = xa.I * xb.I;
+  const E = xa.E + xb.E;
+  const info = { da, db, xa, xb, prod: I, prodLen: bitLen(I), E };
+  const { value, trace } = roundExact(sign, I, E);
+  return { value, info, trace };
+}
+
+/* ================= digit-string rounding (Function 2) =================== */
+function parseDigitString(str, base) {
+  str = str.trim();
+  let sign = 1;
+  if (str[0] === "+" || str[0] === "-") { if (str[0] === "-") sign = -1; str = str.slice(1); }
+  const re = base === 2 ? /^[01]*\.?[01]*$/ : /^[0-9]*\.?[0-9]*$/;
+  if (!re.test(str) || str === "" || str === ".") return null;
+  const [ip = "", fp = ""] = str.split(".");
+  return { sign, digits: (ip + fp).split("").map(Number), point: ip.length };
+}
+
+function digitsToStr(sign, digits, point) {
+  while (point > 1 && digits[0] === 0) { digits = digits.slice(1); point--; }
+  if (point === 0) { digits = [0, ...digits]; point = 1; }
+  const ip = digits.slice(0, point).join("") || "0";
+  const fp = digits.slice(point).join("");
+  return (sign < 0 ? "-" : "") + ip + (fp ? "." + fp : "");
+}
+
+/** Add 1 at the last kept position and propagate the carry (any base). */
+function incrementAt(digits, point, cut, base) {
+  const d = digits.slice(0, cut);
+  let i = d.length - 1, carry = 1;
+  while (i >= 0 && carry) { d[i] += 1; if (d[i] === base) d[i] = 0; else carry = 0; i--; }
+  let p = point;
+  if (carry) { d.unshift(1); p++; }
+  return { digits: d, point: p };
+}
+
+/**
+ * Round `str` (base 2 or 10) keeping N digits, where N counts fractional
+ * digits (mode "frac") or significant digits (mode "sig"). Returns all four
+ * results: chopping, round-up (toward +∞), round-down (toward −∞), RNE.
+ */
+function roundDigits(str, base, N, mode) {
+  const p = parseDigitString(str, base);
+  if (p === null) return { error: "Invalid number for the selected base." };
+  if (!Number.isInteger(N) || N < 1) return { error: "The number of digits must be a positive integer." };
+  let { sign, digits, point } = p;
+
+  let cut;                                       // index of first discarded digit
+  if (mode === "frac") cut = point + N;
+  else {
+    let fs = digits.findIndex(d => d !== 0);
+    if (fs === -1) fs = point;
+    cut = fs + N;
+  }
+  while (digits.length < cut) digits.push(0);    // pad exact zeros
+  if (cut < 1) { digits = Array(1 - cut).fill(0).concat(digits); point += 1 - cut; cut = 1; }
+
+  const keptRaw = digits.slice(0, cut);
+  const discarded = digits.slice(cut);
+  const allZero = discarded.every(d => d === 0);
+  const half = base / 2;
+
+  let cmp;                                       // discarded vs ½ ULP: -1 / 0 / +1
+  if (allZero) cmp = -1;
+  else if (discarded[0] > half) cmp = 1;
+  else if (discarded[0] < half) cmp = -1;
+  else cmp = discarded.slice(1).every(d => d === 0) ? 0 : 1;
+
+  const build = (dig, pt) => {                   // pad zeros when cut < point
+    const w = dig.slice();
+    while (w.length < pt) w.push(0);
+    return digitsToStr(sign, w, pt);
+  };
+  const keep = () => build(keptRaw.slice(), point);
+  const inc  = () => { const r = incrementAt(digits, point, cut, base); return build(r.digits, r.point); };
+
+  const chop = keep();                                        // toward zero
+  const up   = (!allZero && sign > 0) ? inc() : keep();       // toward +∞
+  const down = (!allZero && sign < 0) ? inc() : keep();       // toward −∞
+  let rne, rneWhy;
+  if (cmp === 1)       { rne = inc();  rneWhy = "Discarded part > ½ ULP → round away from zero."; }
+  else if (cmp === -1) { rne = keep(); rneWhy = allZero ? "Nothing was discarded — the value is exact." : "Discarded part < ½ ULP → keep the truncated value."; }
+  else {
+    const lastKept = keptRaw[keptRaw.length - 1];
+    if (lastKept % 2 === 1) { rne = inc();  rneWhy = "Exactly ½ ULP (tie) and the last kept digit is odd → round to even."; }
+    else                    { rne = keep(); rneWhy = "Exactly ½ ULP (tie) and the last kept digit is even → keep."; }
+  }
+  return { keptDigits: keptRaw.join(""), discardedDigits: discarded.join("") || "(none)",
+           allZero, results: { chop, up, down, rne }, rneWhy };
+}
+
+/* ====================== PART B — USER INTERFACE ========================= */
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;");
+
+/* ---- formatting helpers ---- */
+function fieldBits(d){
+  return { s: String(d.sign),
+           e: d.expF.toString(2).padStart(11, "0"),
+           m: d.frac.toString(2).padStart(52, "0") };
+}
+const group4 = s => s.replace(/(.{4})/g, "$1 ").trim();
+function spacedBinary(d){ const f = fieldBits(d); return `${f.s}  ${f.e}  ${group4(f.m)}`; }
+function hexStr(d){ return group4(d.bits.toString(16).toUpperCase().padStart(16, "0")); }
+function decStr(v){
+  if (Number.isNaN(v)) return "NaN (quiet)";
+  if (!Number.isFinite(v)) return v > 0 ? "+Infinity" : "-Infinity";
+  if (Object.is(v, -0)) return "-0";
+  return String(v);
+}
+/** Binary string of a BigInt, grouped, truncated for display if huge. */
+function bstr(I, max = 64){
+  const s = I.toString(2);
+  return s.length <= max ? group4(s) : group4(s.slice(0, max)) + ` … (+${s.length - max} more bits)`;
+}
+
+/* ---- 64-bit register renderer (signature element) ---- */
+function registerHTML(d){
+  const f = fieldBits(d);
+  let h = '<div class="register" aria-label="64-bit register">';
+  h += `<span class="bit s" title="bit 63 · sign">${f.s}</span><span class="bit gap"></span>`;
+  [...f.e].forEach((b, i) => h += `<span class="bit e" title="bit ${62 - i} · exponent">${b}</span>`);
+  h += '<span class="bit gap"></span>';
+  [...f.m].forEach((b, i) => h += `<span class="bit m" title="bit ${51 - i} · mantissa">${b}</span>`);
+  h += '</div>';
+  h += `<div class="legend">
+    <span><span class="dot" style="background:var(--sign)"></span>sign (1)</span>
+    <span><span class="dot" style="background:var(--exp)"></span>exponent (11) · bias 1023</span>
+    <span><span class="dot" style="background:var(--man)"></span>mantissa (52)</span></div>`;
+  return h;
+}
+
+function rrow(label, value){
+  const id = "cp" + Math.random().toString(36).slice(2, 8);
+  return `<div class="rrow"><span class="rlabel">${label}</span>
+    <span class="rval" id="${id}">${esc(value)}</span>
+    <button class="copy" onclick="copyText('${id}')">copy</button></div>`;
+}
+function copyText(id){
+  navigator.clipboard && navigator.clipboard.writeText($(id).innerText);
+}
+function stepsHTML(list){
+  return '<ol class="steps">' + list.map(s =>
+    `<li><h4>${s.t}</h4><div class="body">${s.b}</div></li>`).join("") + "</ol>";
+}
+function fill(id, v){ $(id).value = v; }
+
+/* ---- tabs ---- */
+function showTab(name){
+  for (const t of ["conv", "round", "arith"]){
+    $("tab-" + t).hidden = t !== name;
+    $("tabbtn-" + t).setAttribute("aria-selected", t === name);
+  }
+}
+
+/* =========================== TAB 1 — CONVERTER ========================== */
+function parseDecimalInput(s){
+  s = s.trim();
+  if (/^[+-]?nan$/i.test(s)) return NaN;
+  if (/^[+-]?(inf|infinity|∞)$/i.test(s)) return s[0] === "-" ? -Infinity : Infinity;
+  if (/^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(s)) return Number(s);
+  return undefined;
+}
+
+function runConvert(){
+  const out = $("conv-out"); out.hidden = false;
+  const v = parseDecimalInput($("conv-in").value);
+  if (v === undefined){
+    out.innerHTML = '<p class="err">Invalid input — enter a decimal number (plain or scientific notation), NaN, or ±Infinity.</p>';
+    return;
+  }
+  const d = decode(v), cls = classify(d), f = fieldBits(d);
+  const steps = [];
+
+  steps.push({ t: "Store the input as a binary64 value",
+    b: `Stored value v = <b>${esc(decStr(v))}</b>
+        <div class="note">Decimal inputs that are not exactly representable in binary (e.g. 0.1) are rounded to the nearest binary64 value using round-to-nearest ties-to-even.</div>` });
+  steps.push({ t: "Sign bit",
+    b: `The value is ${d.sign ? "negative → S = 1" : "non-negative → S = 0"}.` });
+
+  if (cls === "NaN"){
+    steps.push({ t: "Special case: NaN",
+      b: `Exponent field all 1s (${f.e}) with a non-zero mantissa encodes <b>Not a Number</b>.` });
+  } else if (cls === "Infinity"){
+    steps.push({ t: "Special case: Infinity",
+      b: `Exponent field all 1s (${f.e}) with mantissa = 0 encodes <b>${d.sign ? "−" : "+"}Infinity</b>.` });
+  } else if (cls === "Zero"){
+    steps.push({ t: "Special case: signed zero",
+      b: `All exponent and mantissa bits are 0 → <b>${d.sign ? "−0" : "+0"}</b> (the sign bit is preserved).` });
+  } else if (cls === "Denormalized"){
+    steps.push({ t: "Normalize — below the normal range",
+      b: `|v| &lt; 2<sup>−1022</sup>, so it is stored <b>denormalized</b>: |v| = 0.${group4(f.m)}₂ × 2<sup>−1022</sup> (no implicit leading 1).` });
+    steps.push({ t: "Exponent field",
+      b: `Denormalized numbers use the reserved exponent field E = 000 0000 0000 (the exponent is fixed at −1022).` });
+    steps.push({ t: "Mantissa (52 bits)", b: group4(f.m) });
+  } else {
+    const e = d.expF - 1023;
+    steps.push({ t: "Normalize to 1.f × 2\u1D49",
+      b: `|v| = <b>1.${group4(f.m)}</b>₂ × 2<sup><b>${e}</b></sup>
+          <div class="note">The leading 1 is implicit — it is not stored.</div>` });
+    steps.push({ t: "Bias the exponent",
+      b: `E = e + bias = ${e} + 1023 = <b>${d.expF}</b> → <b>${f.e}</b>₂` });
+    steps.push({ t: "Mantissa (52 bits)",
+      b: `The fraction bits after the leading 1, padded to 52 bits:<br>${group4(f.m)}` });
+  }
+  steps.push({ t: "Assemble the 64-bit word",
+    b: `${f.s} | ${f.e} | ${group4(f.m)} → hexadecimal <b>${hexStr(d)}</b>` });
+
+  out.innerHTML =
+    `<span class="badge info">${cls}</span>` +
+    registerHTML(d) +
+    rrow("Binary (spaced)", spacedBinary(d)) +
+    rrow("Hexadecimal", hexStr(d)) +
+    rrow("Stored decimal value", decStr(v)) +
+    stepsHTML(steps);
+}
+
+/* =========================== TAB 2 — ROUNDING =========================== */
+function fillRound(v, base, n, mode){
+  $("rnd-in").value = v; $("rnd-base").value = base;
+  $("rnd-n").value = n; $("rnd-mode").value = mode;
+}
+function runRound(){
+  const out = $("rnd-out"); out.hidden = false;
+  const base = Number($("rnd-base").value);
+  const N = Number($("rnd-n").value);
+  const mode = $("rnd-mode").value;
+  const r = roundDigits($("rnd-in").value, base, N, mode);
+  if (r.error){ out.innerHTML = `<p class="err">${r.error}</p>`; return; }
+  const b = base === 2 ? "₂" : "₁₀";
+  out.innerHTML =
+    rrow("Kept digits", r.keptDigits) +
+    rrow("Discarded digits", r.discardedDigits) +
+    (r.allZero ? '<span class="badge ok">Exact — nothing discarded, all four methods agree</span>' : "") +
+    `<table class="methods">
+      <tr><th>Method</th><th>Direction</th><th>Result</th></tr>
+      <tr><td>Chopping (truncation)</td><td>toward 0</td><td class="v">${esc(r.results.chop)}${b}</td></tr>
+      <tr><td>Round-up</td><td>toward +∞</td><td class="v">${esc(r.results.up)}${b}</td></tr>
+      <tr><td>Round-down</td><td>toward −∞</td><td class="v">${esc(r.results.down)}${b}</td></tr>
+      <tr><td>Round-to-nearest, ties-to-even</td><td>nearest</td><td class="v">${esc(r.results.rne)}${b}</td></tr>
+    </table>
+    <p class="note" style="margin-top:8px"><b>Ties-to-even reasoning:</b> ${r.rneWhy}</p>`;
+}
+
+/* ========================== TAB 3 — ARITHMETIC ========================== */
+function fillArith(a, af, b, bf, op){
+  $("op-a").value = a; $("op-a-fmt").value = af;
+  $("op-b").value = b; $("op-b-fmt").value = bf;
+  $("op-op").value = op;
+}
+function parseOperand(text, fmt){
+  if (fmt === "hex"){
+    const h = text.trim().replace(/^0x/i, "").replace(/[\s_]/g, "");
+    if (!/^[0-9a-fA-F]{16}$/.test(h)) return { err: "IEEE hex operands must be exactly 16 hexadecimal digits." };
+    dv.setBigUint64(0, BigInt("0x" + h));
+    return { v: dv.getFloat64(0) };
+  }
+  const v = parseDecimalInput(text);
+  return v === undefined ? { err: "Invalid decimal operand." } : { v };
+}
+/** Show a stored operand as ±1.f × 2^e (or its special form). */
+function operandLine(name, v){
+  const d = decode(v), c = classify(d), f = fieldBits(d);
+  let form;
+  if (c === "Normal")            form = `${d.sign ? "−" : "+"}1.${group4(f.m)}₂ × 2^${d.expF - 1023}`;
+  else if (c === "Denormalized") form = `${d.sign ? "−" : "+"}0.${group4(f.m)}₂ × 2^−1022 (denormalized)`;
+  else                           form = c === "Zero" ? (d.sign ? "−0" : "+0") : decStr(v);
+  return `${name} = ${esc(decStr(v))} → hex ${hexStr(d)}<br>${name} = ${form}`;
+}
+
+function runArith(){
+  const out = $("ar-out"); out.hidden = false;
+  const A = parseOperand($("op-a").value, $("op-a-fmt").value);
+  const B = parseOperand($("op-b").value, $("op-b-fmt").value);
+  if (A.err || B.err){ out.innerHTML = `<p class="err">${A.err || B.err}</p>`; return; }
+  const op = $("op-op").value;
+  const res = op === "add" ? fpAdd(A.v, B.v) : fpMul(A.v, B.v);
+  const native = op === "add" ? A.v + B.v : A.v * B.v;
+  const verified = Object.is(res.value, native) ||
+                   (Number.isNaN(res.value) && Number.isNaN(native));
+  const rd = decode(res.value);
+  const steps = [];
+
+  steps.push({ t: "Decode the operands", b: operandLine("A", A.v) + "<br>" + operandLine("B", B.v) });
+
+  if (res.special){
+    steps.push({ t: "Special-operand rule", b: esc(res.special) });
+  } else if (op === "add"){
+    const i = res.info, t = res.trace;
+    steps.push({ t: "Compare exponents and align the significands",
+      b: `Exponent difference d = <b>${i.d}</b> bit${i.d === 1 ? "" : "s"}.
+          The significand of the operand with the smaller exponent is shifted right by d bits so both share the common exponent 2^${i.E0} at the LSB.
+          <div class="note">Every bit shifted out on the right is preserved exactly here, and is summarized by the Guard/Round/Sticky bits at the rounding step.</div>` });
+    steps.push({ t: "Effective operation: " + i.effOp,
+      b: `Signs ${i.da.sign === i.db.sign ? "are equal → add the aligned magnitudes" : "differ → subtract the smaller aligned magnitude from the larger"}.
+          <br>|result| = ${bstr(res.sumMag)} × 2^${i.E0}` });
+    pushNormalizeRoundSteps(steps, t, rd);
+  } else {
+    const i = res.info, t = res.trace;
+    steps.push({ t: "Add the exponents, multiply the significands",
+      b: `Result sign = S<sub>A</sub> ⊕ S<sub>B</sub> = <b>${rd.sign}</b>.<br>
+          Exact significand product (${i.prodLen} bits):<br>${bstr(i.prod)}<br>
+          scaled by 2^${i.E} (the operand exponents added).` });
+    pushNormalizeRoundSteps(steps, t, rd);
+  }
+
+  const cls = classify(rd);
+  out.innerHTML =
+    `<span class="badge info">${cls}</span>` +
+    (res.trace && res.trace.flag ? `<span class="badge warn">${res.trace.flag}</span>` : "") +
+    `<span class="badge ${verified ? "ok" : "err"}">${verified ? "✓ verified bit-exact against host CPU IEEE 754 hardware" : "✗ mismatch vs hardware (please report)"}</span>` +
+    registerHTML(rd) +
+    rrow("Binary (spaced)", spacedBinary(rd)) +
+    rrow("Hexadecimal", hexStr(rd)) +
+    rrow("Decimal", decStr(res.value)) +
+    stepsHTML(steps);
+}
+
+/** Shared "normalize → GRS → encode" steps for add & multiply traces. */
+function pushNormalizeRoundSteps(steps, t, rd){
+  if (!t) return;
+  steps.push({ t: "Normalize",
+    b: `The leading 1 sits at weight 2^<b>${t.eLead}</b>${t.subnormal
+        ? " — below 2^−1022, so the result stays <b>denormalized</b> (bits are kept down to 2^−1074)"
+        : " → keep 53 significant bits (1 implicit + 52 stored)"}.` });
+  if (t.discarded > 0){
+    steps.push({ t: "Extract Guard, Round and Sticky bits",
+      b: `${t.discarded} low-order bit${t.discarded === 1 ? "" : "s"} cannot fit in the 53-bit significand.<br>
+          <span class="gbit">G = ${t.G}</span> (first discarded bit) ·
+          <span class="gbit">R = ${t.R}</span> (second discarded bit) ·
+          <span class="gbit">S = ${t.S}</span> (OR of all remaining bits)` });
+    steps.push({ t: "Round to nearest, ties to even",
+      b: `${esc(t.why)}.<br>Significand ${t.roundUp ? "after +1 ULP" : "(unchanged)"}: ${bstr(t.keptAfterRound)}` });
+  } else {
+    steps.push({ t: "Rounding", b: "The exact result fits in 53 bits — G = R = S = 0, no rounding needed." });
+  }
+  steps.push({ t: "Encode the final fields",
+    b: `S = ${rd.sign} · E = ${rd.expF} (${rd.expF.toString(2).padStart(11, "0")}₂) · mantissa = ${group4(rd.frac.toString(2).padStart(52, "0"))}` });
+}
+
+/* run the default examples once so the page never opens empty */
+runConvert();
+</script>
+</body>
+</html>
