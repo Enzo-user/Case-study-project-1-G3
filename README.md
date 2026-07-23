@@ -4,7 +4,7 @@
 
 A web-based simulator of a 64-bit IEEE 754 binary floating-point computing machine. It converts decimal numbers to double-precision format, demonstrates the four classical rounding methods, and performs addition and multiplication using the **Guard–Round–Sticky (GRS)** method with a complete step-by-step trace of the computation.
 
-🔗 **Live deployment:** *ADD LINK HERE (also place it in the repository's About → Website field)*
+🔗 **Live deployment:** https://enzo-user.github.io/Case-study-project-1---G3/
 🎬 **Video walkthrough (5–8 min):** *ADD YOUTUBE LINK HERE*
 
 ## Features
