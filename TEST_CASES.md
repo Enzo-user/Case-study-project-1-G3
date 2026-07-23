@@ -1,6 +1,6 @@
 # Machine 3 — Test Cases and Expected Outputs
 
-All expected values below were verified bit-for-bit against native IEEE 754 hardware arithmetic. Take one screenshot per row (store them in `screenshots/`) and demonstrate them in the video in this order.
+All expected values below were verified bit-for-bit against native IEEE 754 hardware arithmetic. 
 
 ## Function 1 · Decimal → double-precision conversion
 
